@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+
+<title>JK BMS 4G Monitor</title>
+
+<script>
+window._AMapSecurityConfig = {
+    securityJsCode: 'fcada99047bf6ebd49ca6d8ca81c91c6'
+};
+</script>
+
+<script src="https://webapi.amap.com/maps?v=2.0&key=35450666bb081d2f71e0719cce61d27f"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<style>
+
+:root{
+    --bg:#0b1016;
+    --card:#131b24;
+    --line:#223140;
+    --text:#dbe7f3;
+    --sub:#6f8399;
+    --blue:#00cfff;
+    --green:#00ff9d;
+    --red:#ff4d67;
+    --yellow:#ffb020;
+}
+
+*{
+    box-sizing:border-box;
+    margin:0;
+    padding:0;
+}
+
+html,body{
+    width:100%;
+    height:100%;
+    background:var(--bg);
+    color:var(--text);
+    overflow:hidden;
+    font-family:sans-serif;
+}
+
+button{
+    border:none;
+    outline:none;
+    cursor:pointer;
+}
+
+#tabs{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    height:48px;
+    background:var(--card);
+    border-bottom:1px solid var(--line);
+    display:flex;
+    z-index:999;
+}
+
+.tab{
+    flex:1;
+    background:none;
+    color:var(--sub);
+    font-size:15px;
+}
+
+.tab.active{
+    color:var(--blue);
+    border-bottom:2px solid var(--blue);
+}
+
+.page{
+    position:absolute;
+    top:48px;
+    left:0;
+    right:0;
+    bottom:0;
+    display:none;
+}
+
+.page.active{
+    display:block;
+}
+
+#container{
+    width:100%;
+    height:100%;
+}
+
+.info-card{
+    position:absolute;
+    top:12px;
+    left:12px;
+    width:280px;
+    background:rgba(19,27,36,.96);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px;
+    z-index:100;
+}
+
+.info-title{
+    font-weight:bold;
+    margin-bottom:10px;
+}
+
+.info-row{
+    margin:7px 0;
+    color:var(--sub);
+}
+
+.speed{
+    color:var(--blue);
+    font-size:28px;
+    font-weight:bold;
+}
+
+.control-panel{
+    position:absolute;
+    bottom:18px;
+    left:50%;
+    transform:translateX(-50%);
+    background:rgba(19,27,36,.96);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    z-index:100;
+    width:95%;
+    max-width:780px;
+}
+
+.ctrl-btn{
+    background:#1b2733;
+    color:white;
+    padding:10px 14px;
+    border-radius:8px;
+}
+
+.ctrl-btn:hover{
+    background:#223243;
+}
+
+.ctrl-btn.red{
+    background:#3a1820;
+    color:#ff6f86;
+}
+
+.status-on{
+    color:var(--green);
+}
+
+.status-off{
+    color:var(--red);
+}
+
+#log-area{
+    margin-top:10px;
+    color:var(--sub);
+    font-size:12px;
+    word-break:break-all;
+}
+
+#bms-page{
+    overflow-y:auto;
+    padding:12px;
+}
+
+.bms-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+    max-width:1200px;
+    margin:auto;
+}
+
+@media(max-width:800px){
+    .bms-grid{
+        grid-template-columns:1fr;
+    }
+}
+
+.panel{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    overflow:hidden;
+}
+
+.panel-header{
+    padding:12px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.panel-title{
+    color:var(--blue);
+    font-weight:bold;
+}
+
+.panel-body{
+    padding:10px 14px;
+}
+
+.data-row{
+    display:flex;
+    justify-content:space-between;
+    padding:7px 0;
+    border-bottom:1px solid rgba(255,255,255,.04);
+}
+
+.data-label{
+    color:var(--sub);
+}
+
+.group-title{
+    color:var(--sub);
+    font-size:12px;
+    padding:12px 14px 0;
+}
+
+.cell-grid{
+    display:grid;
+    grid-template-columns:repeat(8,1fr);
+    gap:6px;
+    padding:12px;
+}
+
+@media(max-width:700px){
+    .cell-grid{
+        grid-template-columns:repeat(4,1fr);
+    }
+}
+
+.cell{
+    background:#10161d;
+    border:1px solid var(--line);
+    border-radius:8px;
+    text-align:center;
+    padding:8px;
+}
+
+.cell-num{
+    font-size:11px;
+    color:var(--sub);
+}
+
+.cell-val{
+    margin-top:5px;
+    font-size:14px;
+}
+
+.cell-high{
+    border-color:var(--red);
+}
+
+.cell-low{
+    border-color:var(--yellow);
+}
+
+.empty{
+    padding:40px;
+    text-align:center;
+    color:var(--sub);
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="tabs">
+    <button class="tab active" onclick="switchTab('gps',this)">📡 GPS</button>
+    <button class="tab" onclick="switchTab('bms',this)">🔋 BMS</button>
+</div>
+
+<!-- GPS -->
+
+<div class="page active" id="gps-page">
+
+    <div class="info-card">
+
+        <div class="info-title">
+            MQTT:
+            <span id="mqtt-status" class="status-off">未连接</span>
+        </div>
+
+        <div class="info-row">
+            速度:
+            <div class="speed" id="speed">-- km/h</div>
+        </div>
+
+        <div class="info-row">
+            经度:
+            <span id="lng">--</span>
+        </div>
+
+        <div class="info-row">
+            纬度:
+            <span id="lat">--</span>
+        </div>
+
+        <div class="info-row">
+            4G信号:
+            <span id="csq-val">--</span>
+            <button class="ctrl-btn" onclick="queryCSQ()" style="padding:4px 8px;font-size:12px;margin-left:8px;">查询</button>
+        </div>
+
+        <div class="info-row">
+            GPS状态:
+            <span id="gps-status">--</span>
+            <button class="ctrl-btn" onclick="queryGPS()" style="padding:4px 8px;font-size:12px;margin-left:8px;">查询</button>
+        </div>
+
+        <div class="info-row" style="margin-top:8px;">
+            <button class="ctrl-btn red" onclick="rebootDevice()" style="padding:6px 14px;font-size:12px;">远程重启4G板</button>
+        </div>
+
+        <div id="log-area">等待数据...</div>
+
+    </div>
+
+    <div id="container"></div>
+
+</div>
+
+<!-- BMS -->
+
+<div class="page" id="bms-page">
+
+    <div class="control-panel" style="position:relative;bottom:auto;left:auto;right:auto;transform:none;width:auto;max-width:none;margin:12px;justify-content:center;">
+
+        <button class="ctrl-btn" onclick="queryBMS()">
+            查询BMS
+        </button>
+
+        <button class="ctrl-btn" onclick="connectBLE()">
+            连接蓝牙
+        </button>
+
+        <button class="ctrl-btn red" onclick="cutoffBLE()">
+            断开蓝牙10分钟
+        </button>
+
+        <button class="ctrl-btn" onclick="queryBLEStatus()" style="padding:10px 14px;">
+            查询蓝牙状态
+        </button>
+
+    </div>
+
+    <div class="info-row" style="text-align:center;margin-top:8px;">
+        蓝牙:
+        <span id="ble-state">--</span>
+        <span id="ble-mac" style="font-family:monospace;font-size:12px;color:var(--sub);margin-left:8px;"></span>
+    </div>
+
+    <div class="bms-grid">
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <div class="panel-title">
+                    ⚡ BMS状态
+                </div>
+
+                <div id="status-time">
+                    --
+                </div>
+
+            </div>
+
+            <div id="status-body">
+
+                <div class="empty">
+                    点击 查询BMS
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <div class="panel-title">
+                    🔋 单体电压
+                </div>
+
+            </div>
+
+            <div id="cells-body">
+
+                <div class="empty">
+                    等待数据
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+function nowStr(){
+    return new Date().toLocaleTimeString();
+}
+
+function switchTab(name,btn){
+
+    document.querySelectorAll('.tab').forEach(t=>{
+        t.classList.remove('active');
+    });
+
+    btn.classList.add('active');
+
+    document.querySelectorAll('.page').forEach(p=>{
+        p.classList.remove('active');
+    });
+
+    document.getElementById(name+'-page').classList.add('active');
+
+    // 切换到BMS页面时自动查询蓝牙状态
+    if(name === 'bms' && client.connected){
+        queryBLEStatus();
+    }
+}
+
+// MQTT修改为你的服务器地址和认证信息
+
+const client = mqtt.connect(
+    'wss://i4f49e49.ala.cn-hangzhou.emqxsl.cn:8084/mqtt',
+    {
+        clientId:'web_'+Math.random().toString(16).slice(2),
+        username:'zc358',
+        password:'zc3588',
+        clean:true
+    }
+);
+
+client.on('connect',()=>{
+
+    document.getElementById('mqtt-status').innerText='已连接';
+    document.getElementById('mqtt-status').className='status-on';
+
+    client.subscribe('T');
+
+    log('MQTT已连接');
+
+    // 初始化查询蓝牙状态
+    queryBLEStatus();
+});
+
+client.on('offline',()=>{
+
+    document.getElementById('mqtt-status').innerText='已断开';
+    document.getElementById('mqtt-status').className='status-off';
+
+    log('MQTT已断开');
+});
+
+function log(txt){
+    document.getElementById('log-area').innerText=txt;
+}
+
+function sendText(txt){
+
+    if(!client.connected){
+        alert('MQTT未连接');
+        return;
+    }
+
+    client.publish('R',txt);
+
+    log('发送: '+txt.trim());
+}
+
+function queryBMS(){
+
+    sendText('chaxun\r\n');
+}
+
+function queryCSQ(){
+    sendText('getcsq\r\n');
+}
+
+function queryGPS(){
+    sendText('getgps\r\n');
+}
+
+function cutoffBLE(){
+
+    if(!confirm('断开蓝牙10分钟？')){
+        return;
+    }
+
+    sendText('cutoffble\r\n');
+}
+
+function queryBLEStatus(){
+    sendText('getblestatus\r\n');
+}
+
+function rebootDevice(){
+    if(!confirm('确定远程重启设备？')){
+        return;
+    }
+    sendText('config,set,reboot\r\n');
+}
+
+function connectBLE(){
+
+    sendText('connectble\r\n');
+}
+
+// ── JK-BMS 协议解析器 ──
+
+function hexToBytes(hex){
+    const bytes = [];
+    for(let i=0;i<hex.length;i+=2){
+        bytes.push(parseInt(hex.substr(i,2),16));
+    }
+    return bytes;
+}
+
+function get16(b,i){ return ((b[i+1]<<8)|b[i])>>>0; }
+function get32(b,i){ return ((get16(b,i+2)<<16)|get16(b,i))>>>0; }
+
+function countBits(n){
+    let c=0;
+    for(let i=0;i<32;i++){ if(n&(1<<i)) c++; }
+    return c;
+}
+
+function parseBMSRaw(hex){
+    const b = hexToBytes(hex);
+    if(b.length<300) return null;
+    if(b[0]!==0x55||b[1]!==0xAA||b[2]!==0xEB||b[3]!==0x90) return null;
+
+    // CRC 校验（调试用）
+    let crc=0;
+    for(let i=0;i<299;i++) crc+=b[i];
+    crc&=0xFF;
+    if(crc!==b[299]) console.warn('BMS CRC mismatch: calc=0x'+crc.toString(16)+' recv=0x'+b[299].toString(16));
+
+    const ftype = b[4];
+    if(ftype===0x02) return parseJK02CellInfo(b);
+    // 0x01 设置帧和 0x03 设备信息帧暂不解析
+    return null;
+}
+
+function parseJK02CellInfo(b){
+    // ── 自动检测 24S vs 32S 帧格式 ──
+    // 双重验证：1) bitmask 位置  2) avg cell voltage 位置
+    const bm24 = (b[57]<<24)|(b[56]<<16)|(b[55]<<8)|b[54];  // 24S bitmask
+    const bm32 = (b[73]<<24)|(b[72]<<16)|(b[71]<<8)|b[70];  // 32S bitmask
+
+    const n24 = countBits(bm24);
+    const n32 = countBits(bm32);
+
+    // avg cell voltage 交叉验证：
+    // 24S 帧的 avgV 在字节 58-59，32S 帧在 74-75
+    // 如果对应位置的值在 2.0-5.0V 范围内，说明那确实就是 avg voltage 字段
+    const avg24 = get16(b, 58) * 0.001;
+    const avg32 = get16(b, 74) * 0.001;
+    const isAvg24valid = avg24 >= 2.0 && avg24 <= 5.0;
+    const isAvg32valid = avg32 >= 2.0 && avg32 <= 5.0;
+
+    let is32S, cellCount, totalCells, offset, off2;
+
+    if(isAvg32valid && !isAvg24valid){
+        // 只有 32S 位置的 avgV 合理 → 确定是 32S
+        is32S = true; cellCount = n32; totalCells = 32; offset = 16; off2 = 32;
+    } else if(isAvg24valid && !isAvg32valid){
+        // 只有 24S 位置的 avgV 合理 → 确定是 24S
+        is32S = false; cellCount = n24; totalCells = 24; offset = 0; off2 = 0;
+    } else if(n32 > 0 && n24 === 0){
+        is32S = true; cellCount = n32; totalCells = 32; offset = 16; off2 = 32;
+    } else if(n24 > 0 && n32 === 0){
+        is32S = false; cellCount = n24; totalCells = 24; offset = 0; off2 = 0;
+    } else {
+        // 模糊情况：用 bit count 跟有电压的电芯数做匹配
+        let voltCells = 0;
+        for(let i=0;i<32;i++){
+            const v = get16(b,6+i*2)*0.001;
+            if(v >= 2.0 && v <= 5.0) voltCells++;  // 合理电压范围才算
+        }
+        if(Math.abs(n32-voltCells) <= Math.abs(n24-voltCells)){
+            is32S = true; cellCount = n32; totalCells = 32; offset = 16; off2 = 32;
+        } else {
+            is32S = false; cellCount = n24; totalCells = 24; offset = 0; off2 = 0;
+        }
+    }
+    if(cellCount===0) cellCount=16;
+
+    console.log('BMS format:', (is32S?'32S':'24S'), 'cells:', cellCount, 'bitmask24:', '0x'+bm24.toString(16), 'bitmask32:', '0x'+bm32.toString(16));
+
+    // ── 单体电压（字节6起，每串2字节）──
+    const cellVoltages=[];
+    for(let i=0;i<totalCells;i++){
+        cellVoltages.push(parseFloat((get16(b,6+i*2)*0.001).toFixed(3)));
+    }
+
+    // ── 线束内阻（字节64+offset起，每串2字节）──
+    const cellResist=[];
+    for(let i=0;i<totalCells;i++){
+        cellResist.push(parseFloat((get16(b,64+offset+i*2)*0.001).toFixed(3)));
+    }
+
+    // ── 有符号16位读取 ──
+    function getS16(b,i){
+        const v = get16(b,i);
+        return v&0x8000 ? v-65536 : v;
+    }
+
+    // ── 有符号32位读取 ──
+    function getS32(b,i){
+        const v = get32(b,i);
+        return v&0x80000000 ? v-4294967296 : v;
+    }
+
+    // ── 总电压 (118+off2) ──
+    const totalVoltage = parseFloat((get32(b,118+off2)*0.001).toFixed(3));
+
+    // ── 电流 (126+off2, 有符号) ──
+    const current = parseFloat((getS32(b,126+off2)*0.001).toFixed(2));
+
+    // ── 功率 ──
+    const power = parseFloat((totalVoltage*current).toFixed(1));
+
+    // ── 温度 ──
+    const temp1 = parseFloat((getS16(b,130+off2)*0.1).toFixed(1));
+    const temp2 = parseFloat((getS16(b,132+off2)*0.1).toFixed(1));
+    // 24S: MOS温度在 b[134], 错误位在 b[136]
+    // 32S: MOS温度在 b[144]=b[112+off2], 错误位在 b[166]=b[134+off2]
+    const mosTemp = is32S
+      ? parseFloat((getS16(b,112+off2)*0.1).toFixed(1))
+      : parseFloat((getS16(b,134+off2)*0.1).toFixed(1));
+
+    // ── 错误位掩码（32S和24S位置不同）──
+    const errors = is32S
+      ? get16(b,134+off2)
+      : get16(b,136+off2);
+
+    // ── 均衡电流 ──
+    const balanceCurr = parseFloat((getS16(b,138+off2)*0.001).toFixed(3));
+
+    // ── 均衡状态 ──
+    const balancingAction = b[140+off2];
+
+    // ── SOC ──
+    const soc = b[141+off2];
+
+    // ── 容量 ──
+    const capRemain = parseFloat((get32(b,142+off2)*0.001).toFixed(2));
+    const capNominal = parseFloat((get32(b,146+off2)*0.001).toFixed(2));
+    const cycleCount = get32(b,150+off2);
+    const cycleCap = parseFloat((get32(b,154+off2)*0.001).toFixed(3));
+
+    // ── SOH ──
+    const soh = b[158+off2];
+
+    // ── 运行时间 ──
+    const runtimeSec = get32(b,162+off2);
+    const days = Math.floor(runtimeSec/86400);
+    const hrs = Math.floor((runtimeSec%86400)/3600);
+    const mins = Math.floor((runtimeSec%3600)/60);
+    const runtimeStr = days+'d '+String(hrs).padStart(2,'0')+'h '+String(mins).padStart(2,'0')+'m';
+
+    // ── MOS 状态 ──
+    const chargeMOS = b[166+off2] > 0;
+    const dischargeMOS = b[167+off2] > 0;
+
+    // ── 均衡工作 ──
+    const balancerOn = b[169+off2] > 0;
+
+    // ── 加热（仅32S）──
+    const heating = is32S ? (b[183+off2] > 0) : false;
+    const heatCurr = is32S ? parseFloat((getS16(b,204+off2)*0.001).toFixed(3)) : 0;
+
+    return {
+        cellCount, totalCells,
+        cellVoltages, cellResist,
+        totalVoltage, current, power,
+        temp1, temp2, mosTemp,
+        errors, balanceCurr, balancingAction,
+        soc, capRemain, capNominal,
+        cycleCount, cycleCap, soh,
+        runtimeStr, runtimeSec,
+        chargeMOS, dischargeMOS, balancerOn,
+        heating, heatCurr,
+        frameCounter: b[5], is32S
+    };
+}
+
+// ── 接收 ──
+
+client.on('message',(topic,message)=>{
+
+    const txt = message.toString().trim();
+
+    console.log(txt);
+
+    // CSQ 响应: csq:19
+    if(txt.startsWith('csq:')){
+        const val = parseInt(txt.substring(4), 10);
+        if(!isNaN(val)){
+            document.getElementById('csq-val').innerText = val;
+            log('4G信号: '+val);
+        }
+        return;
+    }
+
+    // 蓝牙状态响应: blestatus:state,mac,connected
+    if(txt.startsWith('blestatus:')){
+        const body = txt.substring(10);
+        const p = body.split(',');
+        const state = p[0] || 'unknown';
+        const mac = p[1] || '';
+        const conn = p[2] === '1';
+        const stateNames = {
+            'idle':'空闲','scanning':'扫描中','connecting':'连接中',
+            'connected':'已连接','disconnected':'已断开'
+        };
+        document.getElementById('ble-state').innerText = stateNames[state] || state;
+        document.getElementById('ble-state').style.color = conn ? '#00ff9d' : '#ff4d67';
+        document.getElementById('ble-mac').innerText = mac;
+        log('蓝牙: '+(stateNames[state]||state));
+        return;
+    }
+
+    // GPS 响应(精简): gps:fix,lonDir,lon,latDir,lat,speed
+    if(txt.startsWith('gps:')){
+        const body = txt.substring(4);
+        const p = body.split(',');
+        const fix = p[0];
+
+        if(fix !== '1'){
+            document.getElementById('gps-status').innerText = '未定位';
+            log('GPS未定位');
+            return;
+        }
+
+        const lon = parseFloat(p[2]);
+        const lat = parseFloat(p[4]);
+        const speedK = parseFloat(p[5] || 0);
+
+        updateMap(lon, lat, speedK, 0);
+        document.getElementById('gps-status').innerText = '已定位';
+        document.getElementById('lng').innerText = lon.toFixed(6);
+        document.getElementById('lat').innerText = lat.toFixed(6);
+        log('GPS更新成功');
+        return;
+    }
+
+    // ── BMS 原始数据: bms:raw,<hex> ──
+    if(txt.startsWith('bms:raw,')){
+        const hex = txt.substring(8);
+        const data = parseBMSRaw(hex);
+        if(data){
+            renderBMS(data);
+            log('BMS数据解析成功 ('+data.cellCount+'串)');
+        } else {
+            log('BMS数据解析失败');
+        }
+        return;
+    }
+
+    // BMS 错误响应: bms:error,...
+    if(txt.startsWith('bms:error,')){
+        const reason = txt.substring(10);
+        document.getElementById('status-body').innerHTML = `
+        <div class="empty" style="color:#ff4d67;">
+            ${reason}
+        </div>`;
+        document.getElementById('cells-body').innerHTML = `
+        <div class="empty" style="color:#ff4d67;">
+            无法获取BMS数据
+        </div>`;
+        log('BMS错误: '+reason);
+        return;
+    }
+
+    // JSON (兼容旧格式)
+
+    try{
+
+        const data = JSON.parse(txt);
+
+        if(data.error){
+
+            document.getElementById('status-body').innerHTML = `
+            <div class="empty" style="color:#ff4d67;">
+                蓝牙未连接
+            </div>
+            `;
+
+            document.getElementById('cells-body').innerHTML = `
+            <div class="empty" style="color:#ff4d67;">
+                无法获取BMS数据
+            </div>
+            `;
+
+            log('蓝牙未连接');
+
+            return;
+        }
+
+        if(data.battery_voltage !== undefined){
+
+            renderBMS_old(data);
+
+            log('BMS数据更新成功');
+
+            return;
+        }
+
+    }catch(e){}
+
+    // GPS
+
+    if(txt.includes('config,gps,ok')){
+
+        const arr = txt.split(',');
+
+        const fix = arr[3];
+
+        if(fix !== '1'){
+
+            document.getElementById('gps-status').innerText='未定位';
+
+            log('GPS未定位');
+
+            return;
+        }
+
+        const lng = parseFloat(arr[5]);
+        const lat = parseFloat(arr[7]);
+        const speed = parseFloat(arr[8] || 0);
+        const altitude = parseFloat(arr[10] || 0);
+
+        updateMap(lng,lat,speed,altitude);
+
+        document.getElementById('gps-status').innerText='已定位';
+
+        log('GPS更新成功');
+
+        return;
+    }
+
+    // CSQ
+
+    if(txt.includes('config,csq,ok')){
+
+        const arr = txt.split(',');
+
+        document.getElementById('csq-val').innerText = arr[3];
+
+        log('4G信号更新');
+
+        return;
+    }
+
+    // IMEI
+
+    if(txt.includes('config,imei,ok')){
+
+        const arr = txt.split(',');
+
+        alert('IMEI: '+arr[3]);
+
+        return;
+    }
+
+    // 重启
+
+    if(txt.includes('config,reboot,ok')){
+
+        log('✅ 设备正在重启');
+
+        alert('设备正在重启，请稍候...');
+
+        return;
+    }
+
+});
+
+// BMS渲染（原始hex解析版本 — 精简显示）
+function renderBMS(d){
+
+    const voltColor = d.totalVoltage > 50 ? '#4ade80' : (d.totalVoltage > 45 ? '#ffb020' : '#ff4d67');
+
+    const html = `
+
+    <div class="group-title">⚡ 电池状态 · ${d.cellCount}串</div>
+    <div class="panel-body">
+        <div class="data-row">
+            <span class="data-label">总电压</span>
+            <span style="color:${voltColor};font-weight:bold;font-size:1.1em;">${d.totalVoltage.toFixed(2)} V</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">电流</span>
+            <span style="color:${d.current<0?'#4ade80':'#ff4d67'}">${d.current.toFixed(2)} A</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">功率</span>
+            <span>${d.power.toFixed(1)} W</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">SOC / SOH</span>
+            <span>${d.soc}% / ${d.soh}%</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">MOS温度</span>
+            <span>${d.mosTemp} ℃</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">电芯温度</span>
+            <span>T1: ${d.temp1}℃ &nbsp; T2: ${d.temp2}℃</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">运行时间</span>
+            <span>${d.runtimeStr}</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">循环次数</span>
+            <span>${d.cycleCount}</span>
+        </div>
+    </div>
+
+    <div class="group-title">🔌 容量与MOS</div>
+    <div class="panel-body">
+        <div class="data-row">
+            <span class="data-label">剩余 / 额定容量</span>
+            <span>${d.capRemain} / ${d.capNominal} Ah</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">循环容量</span>
+            <span>${d.cycleCap} Ah</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">充电MOS</span>
+            <span style="color:${d.chargeMOS?'#4ade80':'#ff4d67'}">${d.chargeMOS?'● 开启':'○ 关闭'}</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">放电MOS</span>
+            <span style="color:${d.dischargeMOS?'#4ade80':'#ff4d67'}">${d.dischargeMOS?'● 开启':'○ 关闭'}</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">均衡状态</span>
+            <span style="color:${d.balancerOn?'#ffb020':'#6f8399'}">${d.balancerOn?'● 均衡中':'○ 待机'}</span>
+        </div>
+        <div class="data-row">
+            <span class="data-label">均衡电流</span>
+            <span>${d.balanceCurr.toFixed(3)} A</span>
+        </div>
+    </div>
+
+    `;
+
+    document.getElementById('status-body').innerHTML = html;
+
+    // ── 单体电压（仅显示有电压的电芯）──
+    const voltages = d.cellVoltages.filter(v=>v>0);
+    const maxV = Math.max(...voltages);
+    const minV = Math.min(...voltages);
+
+    let cells = '<div class="group-title">🔋 单体电压 ('+voltages.length+'串)</div><div class="cell-grid">';
+
+    d.cellVoltages.forEach((v,i)=>{
+        if(v<=0) return;
+        let cls='';
+        if(v===maxV) cls='cell-high';
+        if(v===minV) cls='cell-low';
+        cells += `
+        <div class="cell ${cls}">
+            <div class="cell-num">C${String(i+1).padStart(2,'0')}</div>
+            <div class="cell-val">${v.toFixed(3)}</div>
+        </div>`;
+    });
+    cells += '</div>';
+
+    // ── 线束内阻（仅显示有效内阻，非零电压对应电芯）──
+    let resist = '<div class="group-title">📡 线束内阻</div><div class="cell-grid">';
+    let resistShown=0;
+    d.cellResist.forEach((r,i)=>{
+        // 只显示对应电芯有电压的内阻
+        if(i<d.cellVoltages.length && d.cellVoltages[i]<=0) return;
+        if(r>0){ resistShown++; }
+        resist += `
+        <div class="cell">
+            <div class="cell-num">C${String(i+1).padStart(2,'0')}</div>
+            <div class="cell-val">${r>0?r.toFixed(3)+' Ω':'--'}</div>
+        </div>`;
+    });
+    resist += '</div>';
+
+    document.getElementById('cells-body').innerHTML = cells + resist;
+
+    document.getElementById('status-time').innerText = nowStr();
+}
+
+// BMS渲染（JSON兼容旧格式）
+function renderBMS_old(d){
+
+    const html = `
+
+    <div class="group-title">电池状态</div>
+    <div class="panel-body">
+        <div class="data-row"><span class="data-label">总电压</span><span>${d.battery_voltage.toFixed(3)} V</span></div>
+        <div class="data-row"><span class="data-label">电流</span><span>${d.charge_current.toFixed(2)} A</span></div>
+        <div class="data-row"><span class="data-label">功率</span><span>${d.battery_power} W</span></div>
+        <div class="data-row"><span class="data-label">SOC</span><span>${d.percent_remain} %</span></div>
+        <div class="data-row"><span class="data-label">MOS温度</span><span>${d.mos_temp} ℃</span></div>
+        <div class="data-row"><span class="data-label">电池温度1</span><span>${d.battery_t1} ℃</span></div>
+        <div class="data-row"><span class="data-label">电池温度2</span><span>${d.battery_t2} ℃</span></div>
+        <div class="data-row"><span class="data-label">运行时间</span><span>${d.uptime}</span></div>
+        <div class="data-row"><span class="data-label">循环次数</span><span>${d.cycle_count}</span></div>
+    </div>
+
+    <div class="group-title">容量信息</div>
+    <div class="panel-body">
+        <div class="data-row"><span class="data-label">额定容量</span><span>${d.nominal_capacity} Ah</span></div>
+        <div class="data-row"><span class="data-label">剩余容量</span><span>${d.capacity_remain} Ah</span></div>
+        <div class="data-row"><span class="data-label">循环容量</span><span>${d.cycle_capacity.toFixed(3)} Ah</span></div>
+    </div>
+
+    <div class="group-title">单体状态</div>
+    <div class="panel-body">
+        <div class="data-row"><span class="data-label">平均单体电压</span><span>${d.avg_cell_voltage.toFixed(3)} V</span></div>
+        <div class="data-row"><span class="data-label">单体压差</span><span>${(d.delta_cell_voltage*1000).toFixed(0)} mV</span></div>
+        <div class="data-row"><span class="data-label">充电MOS</span><span>${d.charge?'开启':'关闭'}</span></div>
+        <div class="data-row"><span class="data-label">放电MOS</span><span>${d.discharge?'开启':'关闭'}</span></div>
+    </div>
+
+    `;
+
+    document.getElementById('status-body').innerHTML = html;
+
+    const maxV = Math.max(...d.cell_voltages);
+    const minV = Math.min(...d.cell_voltages);
+
+    let cells = '<div class="cell-grid">';
+    d.cell_voltages.forEach((v,i)=>{
+        let cls='';
+        if(v===maxV) cls='cell-high';
+        if(v===minV) cls='cell-low';
+        cells += `<div class="cell ${cls}"><div class="cell-num">C${String(i+1).padStart(2,'0')}</div><div class="cell-val">${v.toFixed(3)}</div></div>`;
+    });
+    cells += '</div>';
+
+    let resist = '<div class="group-title">线束内阻</div><div class="cell-grid">';
+    d.wire_resist.forEach((r,i)=>{
+        resist += `<div class="cell"><div class="cell-num">C${String(i+1).padStart(2,'0')}</div><div class="cell-val">${r.toFixed(3)} Ω</div></div>`;
+    });
+    resist += '</div>';
+
+    document.getElementById('cells-body').innerHTML = cells + resist;
+    document.getElementById('status-time').innerText = nowStr();
+}
+
+// 地图
+
+const map = new AMap.Map('container',{
+    zoom:16,
+    center:[113.222351,33.774272]
+});
+
+const marker = new AMap.Marker({
+    map:map,
+    icon: 'https://webapi.amap.com/theme/v1.3/markers/b/mark_bs.png'
+});
+
+let pathData = [];
+
+function colorBySpeed(speed){
+
+    if(speed < 15) return '#00ff9d';
+    if(speed < 30) return '#ffb020';
+    if(speed < 50) return '#ff7a00';
+
+    return '#ff4d67';
+}
+
+function updateMap(lng,lat,speed,altitude){
+
+    if(!lng || !lat){
+        return;
+    }
+
+    AMap.convertFrom([lng,lat],'gps',(status,result)=>{
+
+        if(result.info !== 'ok'){
+            return;
+        }
+
+        const pos = result.locations[0];
+
+        marker.setPosition(pos);
+
+        map.setCenter(pos);
+
+        document.getElementById('lng').innerText = lng.toFixed(6);
+        document.getElementById('lat').innerText = lat.toFixed(6);
+        document.getElementById('speed').innerText = speed.toFixed(1)+' km/h';
+
+        pathData.push({
+            lnglat:pos,
+            speed:speed
+        });
+
+        if(pathData.length > 1){
+
+            const prev = pathData[pathData.length-2];
+
+            new AMap.Polyline({
+                map:map,
+                path:[prev.lnglat,pos],
+                strokeColor:colorBySpeed(speed),
+                strokeWeight:6,
+                strokeOpacity:.85
+            });
+        }
+
+    });
+}
+
+</script>
+
+</body>
+</html>
